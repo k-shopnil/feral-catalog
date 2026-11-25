@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 from datetime import date
 
+from . import aot
 from .names import LANG_WORDS
 from .settings import load_yaml
 from .tmdb import Tmdb
@@ -112,8 +113,9 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         "SELECT f.path,f.url,f.name,f.ext,f.dir_path,f.size_bytes,f.added_at,f.first_seen_at,f.parse_json,f.kind,f.season,f.episode,f.episode_end,"
         "w.tmdb_id,w.kind AS wkind,w.status,w.tags,w.key AS wkey "
         "FROM file f JOIN work w ON w.key=f.work_key "
-        "WHERE f.role='video' AND f.kind IN ('movie','episode') AND f.missing_since IS NULL "
-        "AND w.status IN ('auto','auto_low','manual') AND w.tmdb_id IS NOT NULL"
+        "WHERE f.role='video' AND (f.kind IN ('movie','episode') OR (w.key=? AND f.kind='extra')) AND f.missing_since IS NULL "
+        "AND w.status IN ('auto','auto_low','manual') AND w.tmdb_id IS NOT NULL",
+        (aot.AOT_WORK_KEY,),
     ).fetchall()
     subs_by_dir = defaultdict(list)
     for s in conn.execute("SELECT name,url,dir_path FROM file WHERE role='subtitle' AND missing_since IS NULL"):
@@ -129,25 +131,45 @@ def build(conn, tmdb: Tmdb | None) -> dict:
     t_tags = defaultdict(set)
     t_status = {}
 
+    aot_seen = False
+    aot_season_counts = {
+        s["season_number"]: s.get("episode_count") or len((seasons_raw.get((aot.AOT_TMDB_ID, s["season_number"])) or {}).get("episodes", []))
+        for s in (titles_raw.get(("tv", aot.AOT_TMDB_ID)) or {}).get("seasons", [])
+        if s.get("season_number", 0) > 0
+    }
+
     for r in rows:
         tk = "movie" if r["wkind"] == "movie" else "tv"
         td = titles_raw.get((tk, r["tmdb_id"]))
         if td is None:
             continue
         tid = ("m" if tk == "movie" else "t") + str(r["tmdb_id"])
+        is_aot = tid == aot.AOT_TID
         p = json.loads(r["parse_json"] or "{}")
         langs = p.get("languages") or []
         ep_id = None
         runtime = td.get("runtime_min")
         if tk == "tv":
-            if r["episode"] is None:
-                continue
-            s, e = int(r["season"] or 1), int(r["episode"])
+            if is_aot:
+                resolved = aot.resolve_aot_season_episode(r["path"], r["name"], r["season"], r["episode"], aot_season_counts)
+                if resolved is None:
+                    continue
+                s, e = resolved
+                p, langs = aot.inherit_aot_parsed(r["dir_path"], p)
+                aot_seen = True
+                t_tags[tid].update(json.loads(r["tags"] or "[]"))
+                t_status[tid] = r["status"]
+            else:
+                if r["episode"] is None:
+                    continue
+                s, e = int(r["season"] or 1), int(r["episode"])
             ep_id = f"{tid}:s{s}e{e}"
             sdata = seasons_raw.get((r["tmdb_id"], s)) or {}
             ep = next((x for x in sdata.get("episodes", []) if x["episode_number"] == e), None)
             if ep and ep.get("runtime_min"):
                 runtime = ep["runtime_min"]
+            file_added = r["added_at"] or r["first_seen_at"]
+            health_preview = _health(r["size_bytes"], runtime, "episode") if is_aot else "ok"
             if ep_id not in episodes:
                 episodes[ep_id] = {
                     "id": ep_id, "title_id": tid, "season_number": s, "episode_number": e,
@@ -157,10 +179,11 @@ def build(conn, tmdb: Tmdb | None) -> dict:
                     "air_date": (ep or {}).get("air_date"),
                     "runtime_min": (ep or {}).get("runtime_min"),
                     "metadata_pending": ep is None,
-                    "added_at": r["added_at"] or r["first_seen_at"],
+                    "added_at": None if (is_aot and health_preview == "broken") else file_added,
                 }
-            else:
-                episodes[ep_id]["added_at"] = min(episodes[ep_id]["added_at"], r["added_at"] or r["first_seen_at"])
+            elif not (is_aot and health_preview == "broken"):
+                cur_added = episodes[ep_id]["added_at"]
+                episodes[ep_id]["added_at"] = file_added if cur_added is None else min(cur_added, file_added)
         health = _health(r["size_bytes"], runtime, r["kind"])
         if health == "broken":
             continue
@@ -184,6 +207,9 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         t_versions[tid].append(versions[vid])
         t_tags[tid].update(json.loads(r["tags"] or "[]"))
         t_status[tid] = r["status"]
+
+    if aot_seen:
+        aot.fill_missing_aot_episodes(episodes, seasons_raw)
 
     trend = {}
     if tmdb is not None:
@@ -243,7 +269,7 @@ def build(conn, tmdb: Tmdb | None) -> dict:
             "_rec": [("m" if tk == "movie" else "t") + str(i) for i in td.get("rec_ids", []) + td.get("similar_ids", [])],
         }
         if tk == "tv":
-            eps = [e for e in episodes.values() if e["title_id"] == tid and any(v["episode_id"] == e["id"] for v in vs)]
+            eps = [e for e in episodes.values() if e["title_id"] == tid and (tid == aot.AOT_TID or any(v["episode_id"] == e["id"] for v in vs))]
             by_season = defaultdict(list)
             for e in eps:
                 by_season[e["season_number"]].append(e)
@@ -269,7 +295,7 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         t["similar_ids"] = [x for x in dict.fromkeys(t.pop("_rec")) if x in titles and x != t["id"]][:20]
 
     live_eps = {v["episode_id"] for v in versions.values() if v["episode_id"]}
-    episodes = {k: v for k, v in episodes.items() if k in live_eps and v["title_id"] in titles}
+    episodes = {k: v for k, v in episodes.items() if (k in live_eps or v["title_id"] == aot.AOT_TID) and v["title_id"] in titles}
     return {"titles": titles, "seasons": seasons, "episodes": episodes, "versions": versions}
 
 

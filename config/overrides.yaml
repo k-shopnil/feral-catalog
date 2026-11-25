@@ -7,4 +7,5 @@
 #   tmdb: { kind: movie, id: 263115 }
 # - match: "disk11/FIFA.World.Cup.2022*"
 #   ignore: true
-[]
+- match: "s|disk7/ANIME - PART TWO/Attack On Titan/"
+  tmdb: { kind: tv, id: 1429 }
