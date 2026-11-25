@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- placeholder launcher icon (functional build; branding comes with the beautify pass) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#101412"
+        android:pathData="M24,2a22,22 0 1,0 0.01,0z" />
+    <path
+        android:fillColor="#73FFAA"
+        android:pathData="M24,10a14,14 0 0,1 13.4,10h-4.3a10,10 0 0,0 -18.2,0h-4.3A14,14 0 0,1 24,10zM10.6,28h4.3a10,10 0 0,0 18.2,0h4.3A14,14 0 0,1 10.6,28zM34,20l6,0l-3,-5zM14,28l-6,0l3,5z" />
+</vector>

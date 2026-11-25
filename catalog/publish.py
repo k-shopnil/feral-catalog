@@ -11,7 +11,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from .settings import PAGES_BASE_URL, PAGES_REPO, SITE, load_yaml
+import base64
+
+import httpx
+
+from .settings import PAGES_BASE_URL, PAGES_BRANCH, PAGES_REPO, PAGES_REPO_SLUG, SITE, load_yaml
 
 log = logging.getLogger("publish")
 
@@ -174,3 +178,153 @@ def push_pages() -> bool:
     _git("gc", "-q", "--prune=now", check=False)
     log.info("pushed site to gh-pages (%s)", PAGES_BASE_URL)
     return True
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Shared state between indexers (PC and phone). Both publish to the same gh-pages branch from their own copy of
+# state.db, so a device whose state is older than what is already published must not publish: its catalog
+# versions would go backwards and the TVs would sync a stale catalog.
+
+class BehindError(RuntimeError):
+    """The published catalog is newer than this device's state.db."""
+
+
+def fetch_remote_manifest(timeout: float = 20.0) -> dict | None:
+    """The manifest currently served by GitHub Pages, or None if it can't be fetched (caller decides)."""
+    try:
+        r = httpx.get(PAGES_BASE_URL + "manifest.json", params={"t": int(time.time())}, timeout=timeout,
+                      headers={"Cache-Control": "no-cache"})
+        if r.status_code == 200:
+            return r.json()
+        log.warning("remote manifest: HTTP %s", r.status_code)
+    except Exception as e:  # noqa: BLE001 - network errors are reported, the caller decides whether to go on
+        log.warning("remote manifest unavailable: %s", e)
+    return None
+
+
+def local_catalog_version(conn) -> int:
+    return conn.execute("SELECT MAX(version) AS v FROM catalog_version").fetchone()["v"] or 0
+
+
+def ensure_not_behind(conn, remote: dict | None) -> None:
+    if not remote:
+        return
+    local = local_catalog_version(conn)
+    published = int(remote.get("catalog_version") or 0)
+    if published > local:
+        raise BehindError(
+            f"published catalog is version {published} but this device's state.db is at {local}. "
+            "Another device has published since this state was copied. Import that device's state.db "
+            "(python -m catalog import-state / the phone app's Import) before running here."
+        )
+
+
+def sync_site_from_pages(remote: dict | None) -> int:
+    """Download the published snapshot/deltas that the manifest lists but site/ lacks (e.g. a fresh phone, or a
+    PC after the phone published). Verifies sha256. Returns the number of files fetched."""
+    if not remote:
+        return 0
+    wanted = []
+    snap = remote.get("snapshot") or {}
+    if snap.get("url"):
+        wanted.append((snap["url"], snap.get("sha256")))
+    wanted += [(d["url"], d.get("sha256")) for d in remote.get("deltas", []) if d.get("url")]
+    fetched = 0
+    with httpx.Client(timeout=httpx.Timeout(120.0, connect=20.0)) as client:
+        for rel, sha in wanted:
+            path = SITE / rel
+            if path.exists() and (not sha or hashlib.sha256(path.read_bytes()).hexdigest() == sha):
+                continue
+            r = client.get(PAGES_BASE_URL + rel)
+            r.raise_for_status()
+            if sha and hashlib.sha256(r.content).hexdigest() != sha:
+                raise RuntimeError(f"sha256 mismatch for {rel} downloaded from Pages")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(r.content)
+            fetched += 1
+            log.info("fetched %s from Pages (%d bytes)", rel, len(r.content))
+    return fetched
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Publishing through the GitHub API (no git binary needed; used by the phone app).
+
+def _git_blob_sha(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def push_pages_api(token: str, dry_run: bool = False) -> bool:
+    """Publish site/ to gh-pages as a single orphan commit, like push_pages(), through the Git Data API.
+
+    Only blobs GitHub doesn't already have are uploaded. delta/ and snapshot/ follow site/ exactly (pruned files
+    disappear, as with the git push); any other file that exists only on the branch is kept.
+    dry_run: read the branch and report what would be uploaded, without writing anything.
+    """
+    api = f"https://api.github.com/repos/{PAGES_REPO_SLUG}"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "feral-catalog"}
+    try:
+        with httpx.Client(headers=headers, timeout=httpx.Timeout(120.0, connect=20.0)) as gh:
+            remote_tree: dict[str, str] = {}
+            r = gh.get(f"{api}/git/ref/heads/{PAGES_BRANCH}")
+            branch_exists = r.status_code == 200
+            if branch_exists:
+                head = r.json()["object"]["sha"]
+                tree_sha = gh.get(f"{api}/git/commits/{head}").raise_for_status().json()["tree"]["sha"]
+                t = gh.get(f"{api}/git/trees/{tree_sha}", params={"recursive": "1"}).raise_for_status().json()
+                if t.get("truncated"):
+                    raise RuntimeError("gh-pages tree listing truncated")
+                remote_tree = {e["path"]: e["sha"] for e in t["tree"] if e["type"] == "blob"}
+            elif r.status_code != 404:
+                r.raise_for_status()
+
+            known = set(remote_tree.values())
+            entries, uploaded, up_bytes = [], 0, 0
+            local_paths = set()
+            for p in sorted(SITE.rglob("*")):
+                if not p.is_file() or ".git" in p.relative_to(SITE).parts:
+                    continue
+                rel = p.relative_to(SITE).as_posix()
+                data = p.read_bytes()
+                sha = _git_blob_sha(data)
+                if sha not in known and dry_run:
+                    log.info("dry run: would upload %s (%d bytes)", rel, len(data))
+                    known.add(sha)
+                    uploaded += 1
+                    up_bytes += len(data)
+                elif sha not in known:
+                    res = gh.post(f"{api}/git/blobs", json={"content": base64.b64encode(data).decode("ascii"),
+                                                           "encoding": "base64"}).raise_for_status().json()
+                    if res["sha"] != sha:
+                        raise RuntimeError(f"blob sha mismatch for {rel}")
+                    known.add(sha)
+                    uploaded += 1
+                    up_bytes += len(data)
+                entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": sha})
+                local_paths.add(rel)
+            for rel, sha in remote_tree.items():
+                if rel not in local_paths and not rel.startswith(("delta/", "snapshot/")):
+                    entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": sha})
+
+            if dry_run:
+                dropped = sorted(set(remote_tree) - local_paths - {e["path"] for e in entries})
+                log.info("dry run: %d files, %d new blobs (%d bytes); branch files dropped: %s",
+                         len(entries), uploaded, up_bytes, dropped or "none")
+                return True
+            tree = gh.post(f"{api}/git/trees", json={"tree": entries}).raise_for_status().json()["sha"]
+            commit = gh.post(f"{api}/git/commits", json={
+                "message": f"catalog {time.strftime('%Y-%m-%d %H:%M')}", "tree": tree, "parents": [],
+            }).raise_for_status().json()["sha"]
+            if branch_exists:
+                gh.patch(f"{api}/git/refs/heads/{PAGES_BRANCH}", json={"sha": commit, "force": True}).raise_for_status()
+            else:
+                gh.post(f"{api}/git/refs", json={"ref": f"refs/heads/{PAGES_BRANCH}", "sha": commit}).raise_for_status()
+        log.info("pushed site to gh-pages via API (%d files, %d new blobs, %d bytes uploaded) %s",
+                 len(entries), uploaded, up_bytes, PAGES_BASE_URL)
+        return True
+    except httpx.HTTPStatusError as e:
+        log.error("gh-pages API push failed: HTTP %s %s: %s", e.response.status_code, e.request.url.path,
+                  e.response.text[:300])
+    except Exception as e:  # noqa: BLE001 - reported as a failed push; the run summary shows it
+        log.error("gh-pages API push failed: %s", e)
+    return False

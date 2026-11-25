@@ -19,3 +19,41 @@ Phase 1 gate: the `reachability` workflow checks that GitHub runners can reach t
 ## Secrets
 
 - `TMDB_READ_ACCESS` (Actions secret): TMDB API Read Access Token. Never commit it. For local runs, put it in a `.env` file (see `.env.example`).
+
+## Running from a phone (android/)
+
+`android/` is a small Android app ("feral catalog") that runs this same `catalog` package on the phone through
+[Chaquopy](https://chaquo.com/chaquopy/) (Python 3.12), so the PC doesn't have to stay on. The package and `config/`
+are copied into the APK at build time, so the phone always runs the repo's code.
+
+- Build: `cd android && .\gradlew.bat :app:assembleDebug` (needs Python 3.12 on the PC for Chaquopy's pip step).
+- **It only works on a network that can reach `movie.ctgfun.com` (BDIX).** "Check connection" tests that first.
+- Tokens are baked into the (private, never-published) APK from `android/secrets.properties`
+  (git-ignored: `TMDB_READ_ACCESS=...`, `GITHUB_TOKEN=...` and the optional `FANART_API_KEY=...`). Setup can override them; overrides are stored
+  encrypted on the phone. Never commit that file or upload the APK anywhere: this repo is public.
+- **Quick update** (top of the app) = checks, crawl, publish anything new. The advanced section keeps the
+  dry-run / force-publish / full re-crawl switches.
+- The phone publishes through the GitHub API (`publish.push_pages_api`), not `git push`.
+
+### Moving the indexer between PC and phone (automatic, through Google Drive)
+
+`catalog/gdrive.py` hands `state.db` over through the owner's Google Drive, so either device can just run:
+
+1. take a lock on Drive (the other device refuses to start while it's held; abandoned locks expire after 4 h),
+2. download Drive's newest `state.db` if it is newer than the local one (checked by generation + sha256),
+3. run the normal pipeline,
+4. upload the `state.db` (gzip, about 25 MB) as the next generation and release the lock.
+
+Drive keeps the last 10 generations in the folder `feral-catalog-state` (scope `drive.file`: the app only sees
+files it created). Credentials: `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN` in
+`feral-catalog/.env` (git-ignored) and `android/secrets.properties`. One-time sign-in:
+`python -m catalog drive-auth --file client_secret_*.json`. Other commands: `drive-status`, `drive-pull`,
+`drive-push`, `drive-unlock` (clears a stuck lock). `run --no-drive` skips the hand-off.
+
+Without Drive (or as a fallback) the manual way still works: `export-state --file state.db` / the app's
+**Export state** on the device that ran last, then **Import state** / `import-state --file state.db` on the other
+(the old state is kept as `data/state.db.bak-<time>`).
+
+A guard refuses to run when the published catalog is newer than the local `state.db`, so a stale device
+(e.g. the PC's scheduled task after a trip) can't roll the catalog back. Each run also downloads any
+published snapshot/delta files its `site/` is missing.

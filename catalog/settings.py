@@ -9,13 +9,18 @@ import yaml
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
-SITE = ROOT / "site"
-CONFIG = ROOT / "config"
-LOGS = ROOT / "logs"
-REPORTS = ROOT / "reports"
+# FERAL_HOME / FERAL_CONFIG relocate the writable state and the config (the Android app sets them; the PC
+# leaves them unset, so everything stays under the repo as before).
+HOME = Path(os.environ["FERAL_HOME"]) if os.environ.get("FERAL_HOME") else ROOT
+DATA = HOME / "data"
+SITE = HOME / "site"
+CONFIG = Path(os.environ["FERAL_CONFIG"]) if os.environ.get("FERAL_CONFIG") else ROOT / "config"
+LOGS = HOME / "logs"
+REPORTS = HOME / "reports"
 
 PAGES_REPO = "https://github.com/k-shopnil/feral-catalog.git"
+PAGES_REPO_SLUG = "k-shopnil/feral-catalog"
+PAGES_BRANCH = "gh-pages"
 PAGES_BASE_URL = "https://k-shopnil.github.io/feral-catalog/"
 
 for d in (DATA, SITE, LOGS, REPORTS):

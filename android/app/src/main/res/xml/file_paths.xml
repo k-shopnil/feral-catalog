@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- run logs, shared with the "Share log" button -->
+    <files-path name="logs" path="feral/logs/" />
+</paths>
