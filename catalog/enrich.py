@@ -102,6 +102,9 @@ def trim_title(kind: str, d: dict) -> dict:
         "poster_path": d.get("poster_path"),
         "backdrop_path": d.get("backdrop_path"),
         "card_backdrop_path": _best_image(backdrops, (None, "en")) or d.get("backdrop_path"),
+        # True only when the card image is a language-neutral (text-free) backdrop; the app overlays a
+        # title/logo only then, otherwise the artwork's own printed title would appear twice.
+        "card_backdrop_textless": _best_image(backdrops, (None,)) is not None,
         "logo_path": _best_image(logos, ("en", None)),
         "trailer_keys": _trailers((d.get("videos") or {}).get("results", []), d.get("original_language")),
         "cast": cast,

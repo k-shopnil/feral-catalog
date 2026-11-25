@@ -229,6 +229,7 @@ def build(conn, tmdb: Tmdb | None) -> dict:
             "bayes_rating": bayes,
             "poster_path": td.get("poster_path"), "backdrop_path": td.get("backdrop_path"),
             "card_backdrop_path": td.get("card_backdrop_path"), "logo_path": td.get("logo_path"),
+            "card_backdrop_textless": bool(td.get("card_backdrop_textless")),
             "trailer_keys": td.get("trailer_keys", []), "cast": td.get("cast", []), "directors": td.get("directors", []),
             "collection": td.get("collection"), "show_status": td.get("status") if tk == "tv" else None,
             "tags": sorted(tags),
