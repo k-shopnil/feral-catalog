@@ -130,6 +130,7 @@ def main(argv=None):
     ap.add_argument("--limit", type=int)
     ap.add_argument("--no-push", action="store_true")
     ap.add_argument("--force-push", action="store_true")
+    ap.add_argument("--refresh-logos", action="store_true", help="re-enrich titles missing logos or using .svg logos")
     ap.add_argument("--budget-minutes", type=int, default=0)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
@@ -145,7 +146,7 @@ def main(argv=None):
         log.info("match: %s", match_works(conn, tmdb, limit=args.limit))
     elif args.command == "enrich":
         tmdb = Tmdb(conn)
-        log.info("enrich: %s", enrich(conn, tmdb))
+        log.info("enrich: %s", enrich(conn, tmdb, refresh_logos=args.refresh_logos))
     elif args.command == "publish":
         cmd_publish(conn, args)
     elif args.command == "report":

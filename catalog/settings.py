@@ -33,6 +33,10 @@ def tmdb_token() -> str:
     return tok
 
 
+def fanart_key() -> str | None:
+    return (os.environ.get("FANART_API_KEY") or os.environ.get("FANART_API") or "").strip() or None
+
+
 @dataclass
 class Root:
     path: str               # decoded, relative to base, ends with '/'

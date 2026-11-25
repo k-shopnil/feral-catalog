@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
+
+from .settings import fanart_key
 from .tmdb import Tmdb
 
 log = logging.getLogger("enrich")
@@ -14,14 +18,77 @@ TITLE_TTL = 14 * 86400
 SEASON_TTL_ENDED = 30 * 86400
 SEASON_TTL_ONGOING = 86400
 CERT_COUNTRIES = ("US", "IN", "GB")
+IMAGE_LANGS = "en,null,hi,ta,te,ml,kn,bn,ja,ko,zh,es,fr,de,tr,ar,ru,id,th,pt,it"
+_fanart_lock = threading.Lock()
+_fanart_http: httpx.Client | None = None
+
+
+def _fanart_client() -> httpx.Client:
+    global _fanart_http
+    with _fanart_lock:
+        if _fanart_http is None:
+            _fanart_http = httpx.Client(
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=16),
+            )
+        return _fanart_http
 
 
 def _best_image(items: list[dict], langs: tuple) -> str | None:
     for lang in langs:
-        pool = [i for i in items if i.get("iso_639_1") == lang]
+        pool = [i for i in items if i.get("iso_639_1") == lang and i.get("file_path")]
         if pool:
             pool.sort(key=lambda i: (i.get("vote_average") or 0, i.get("vote_count") or 0, i.get("width") or 0), reverse=True)
             return pool[0].get("file_path")
+    return None
+
+
+def _best_logo(logos: list[dict], orig_lang: str | None) -> str | None:
+    """Pick best logo preferring PNG/raster over SVG across en -> null -> original_language."""
+    langs = tuple(dict.fromkeys(["en", None, orig_lang] if orig_lang else ["en", None]))
+    raster = [i for i in logos if not (i.get("file_path") or "").lower().endswith(".svg")]
+    return _best_image(raster, langs) or _best_image(logos, langs)
+
+
+def _fanart_logo(kind: str, tmdb_id: int, imdb_id: str | None, tvdb_id: int | None, orig_lang: str | None) -> str | None:
+    """Optional Fanart.tv fallback for transparent PNG logos when TMDB has none."""
+    key = fanart_key()
+    if not key:
+        return None
+    if kind == "movie":
+        ident = str(tmdb_id or imdb_id or "")
+        url = f"https://webservice.fanart.tv/v3/movies/{ident}" if ident else None
+        buckets = ("hdmovielogo", "movielogo")
+    else:
+        url = f"https://webservice.fanart.tv/v3/tv/{tvdb_id}" if tvdb_id else None
+        buckets = ("hdtvlogo", "clearlogo")
+    if not url:
+        return None
+    client = _fanart_client()
+    data = None
+    for attempt in range(2):
+        try:
+            r = client.get(url, params={"api_key": key})
+            if r.status_code == 200:
+                data = r.json()
+                break
+            if r.status_code == 429 and attempt == 0:
+                time.sleep(1.0)
+                continue
+            return None
+        except httpx.HTTPError:
+            return None
+    if not data:
+        return None
+    items = []
+    for b in buckets:
+        items.extend(data.get(b) or [])
+    allowed = tuple(dict.fromkeys(["en", "00", "", orig_lang] if orig_lang else ["en", "00", ""]))
+    for lang in allowed:
+        pool = [i for i in items if (i.get("lang") or "") == lang and i.get("url")]
+        if pool:
+            pool.sort(key=lambda i: int(i.get("likes") or 0), reverse=True)
+            return pool[0]["url"]
     return None
 
 
@@ -59,11 +126,13 @@ def _cert_tv(d: dict) -> str | None:
     return None
 
 
-def trim_title(kind: str, d: dict) -> dict:
+def trim_title(kind: str, d: dict, logo_override: str | None = None) -> dict:
     images = d.get("images") or {}
     backdrops = images.get("backdrops") or []
     logos = images.get("logos") or []
     is_movie = kind == "movie"
+    orig_lang = d.get("original_language")
+    ext = d.get("external_ids") or {}
     if is_movie:
         cast = [
             {"id": c["id"], "name": c["name"], "character": (c.get("character") or "")[:60], "profile_path": c.get("profile_path")}
@@ -105,11 +174,12 @@ def trim_title(kind: str, d: dict) -> dict:
         # True only when the card image is a language-neutral (text-free) backdrop; the app overlays a
         # title/logo only then, otherwise the artwork's own printed title would appear twice.
         "card_backdrop_textless": _best_image(backdrops, (None,)) is not None,
-        "logo_path": _best_image(logos, ("en", None)),
+        "logo_path": _best_logo(logos, orig_lang) or logo_override,
         "trailer_keys": _trailers((d.get("videos") or {}).get("results", []), d.get("original_language")),
         "cast": cast,
         "directors": directors,
-        "imdb_id": (d.get("external_ids") or {}).get("imdb_id") or d.get("imdb_id"),
+        "imdb_id": ext.get("imdb_id") or d.get("imdb_id"),
+        "tvdb_id": ext.get("tvdb_id"),
         "certification": _cert_movie(d) if is_movie else _cert_tv(d),
         "collection": {"id": coll["id"], "name": coll["name"]} if coll else None,
         "rec_ids": recs,
@@ -147,18 +217,29 @@ def fetch_title(tmdb: Tmdb, kind: str, tmdb_id: int) -> dict | None:
     else:
         append = "aggregate_credits,keywords,images,external_ids,videos,content_ratings,recommendations,similar,alternative_titles"
     d = tmdb.get(f"/{kind}/{tmdb_id}", {"append_to_response": append, "language": "en-US",
-                                         "include_image_language": "en,null", "include_video_language": "en,null,hi,ta,te,ml,ko,ja"},
+                                         "include_image_language": IMAGE_LANGS,
+                                         "include_video_language": "en,null,hi,ta,te,ml,ko,ja"},
                  cache=False)
-    return trim_title(kind, d) if d else None
+    if not d:
+        return None
+    out = trim_title(kind, d)
+    if not out.get("logo_path"):
+        out["logo_path"] = _fanart_logo(kind, tmdb_id, out.get("imdb_id"), out.get("tvdb_id"), out.get("original_language"))
+    return out
 
 
-def enrich(conn, tmdb: Tmdb, workers: int = 8) -> dict:
+def enrich(conn, tmdb: Tmdb, workers: int = 8, refresh_logos: bool = False) -> dict:
     now = int(time.time())
     stats = {"titles": 0, "seasons": 0, "failed": 0}
+    extra_clause = (
+        " OR json_extract(t.data, '$.logo_path') IS NULL OR json_extract(t.data, '$.logo_path') LIKE '%.svg'"
+        if refresh_logos else ""
+    )
     want = conn.execute(
         "SELECT DISTINCT CASE w.kind WHEN 'movie' THEN 'movie' ELSE 'tv' END AS k, w.tmdb_id AS id FROM work w "
         "LEFT JOIN tmdb_title t ON t.kind = (CASE w.kind WHEN 'movie' THEN 'movie' ELSE 'tv' END) AND t.tmdb_id = w.tmdb_id "
-        "WHERE w.status IN ('auto','auto_low','manual') AND w.tmdb_id IS NOT NULL AND (t.fetched_at IS NULL OR t.fetched_at < ?)",
+        "WHERE w.status IN ('auto','auto_low','manual') AND w.tmdb_id IS NOT NULL "
+        f"AND (t.fetched_at IS NULL OR t.fetched_at < ?{extra_clause})",
         (now - TITLE_TTL,),
     ).fetchall()
 
