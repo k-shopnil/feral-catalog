@@ -1,0 +1,10 @@
+# Manual match corrections. They always win over automatic matching (plan §5.5.7).
+# `match` is a glob against a work's first file path (decoded, relative to the server root)
+# or against its work key (see reports/unmatched.csv and reports/low_confidence.csv).
+#
+# Examples:
+# - match: "disk7/Movie Series/X-Men Universe/Logan (2017)*"
+#   tmdb: { kind: movie, id: 263115 }
+# - match: "disk11/FIFA.World.Cup.2022*"
+#   ignore: true
+[]

@@ -1,0 +1,31 @@
+# Real names from the storage server (recon 2026-11-25).
+- name: "Zip Wire (2026) Hindi English 1080p WEBRip x264 ESub [DDN].mp4"
+  expect: { kind: movie, title: "Zip Wire", year: 2026, languages: [hi, en], resolution: 1080, source: WEBRip, video_codec: h264, subs_hint: true }
+- name: "7G (2024) Tamil 1080p WEBRip x264 ESub [DDN].mkv"
+  expect: { kind: movie, title: "7G", year: 2024, languages: [ta] }
+- name: "#MenToo (2023) Telugu 1080p WEBRip x264 ESub [DDN]"
+  expect: { kind: movie, title: "MenToo", year: 2023, languages: [te] }
+- name: "2_Memories of Murder (2003) Hindi 1080p WEBRip x264 ESub [DDN]"
+  expect: { kind: movie, title: "Memories of Murder", year: 2003, languages: [hi] }
+- name: "Black.Adam.2022.2160p.WEB-DL.x265.DDP5.1.Atmos [DDN]"
+  expect: { kind: movie, title: "Black Adam", year: 2022, resolution: 2160, video_codec: hevc }
+- name: "X-Men - Apocalypse (2016) 1080p 10bit Bluray x265 HEVC [Org BD 5.1 Hindi + DD 5.1 English] MSubs ~ TombDoc.mkv"
+  expect: { kind: movie, title: "X-Men - Apocalypse", year: 2016, bit_depth: 10, languages: [hi, en] }
+- name: "Deadpool 2 (2018) Super Duper Cut 1080p 10bit Bluray x265 HEVC [Org BD 5.1 Hindi + DD 5.1 English] MSubs ~ TombDoc.mkv"
+  expect: { kind: movie, title: "Deadpool 2", year: 2018, edition: "Super Duper Cut" }
+- name: "0.0.Mhz.2019.KOREAN.1080p.BluRay.H264.AAC [DDN]"
+  expect: { kind: movie, year: 2019, languages: [ko], source: BluRay }
+- name: "Ikkis (2026) Hindi 1080p HDTS x264 [DDN].mkv"
+  expect: { kind: movie, title: "Ikkis", cam: true }
+- name: "1883.S01E01.720p.AMZN.WEBRip.x264 [DDN].mkv"
+  expect: { kind: episode, season: 1, episode: 1, resolution: 720 }
+- name: "3.Body.Problem.S01E02.Red.Coast.Hindi.English.1080p.WEBRip.x265.ESub [DDN].mp4"
+  expect: { kind: episode, title: "3 Body Problem", season: 1, episode: 2, episode_title: "Red Coast", languages: [hi, en] }
+- name: "13.Reasons.Why.S01E01.Tape.1,.Side.A.1080p.NF.WEBRip.x265 [DDN].mkv"
+  expect: { kind: episode, season: 1, episode: 1 }
+- name: "[MxT] Battle Through the Heavens - S05E17v2 [Web.4K.SDR.HEVC.8bit.AAC.eAC3].mkv"
+  expect: { kind: episode, season: 5, episode: 17 }
+- name: "FIFA.World.Cup.2022.Final.Argentina.Vs.France.1080p.WEBRip.x264 [DDN].mkv"
+  expect: { kind: special }
+- name: "The.95th.Annual.Academy.Awards.2023.1080p.HDTV.x265 [DDN].mkv"
+  expect: { kind: special }

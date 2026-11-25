@@ -1,0 +1,113 @@
+# Content rows, precomputed on the PC into rows.json (plan §8; MVP: server-resolved lists).
+# where ops: eq, in, not_in, gte, lte, within_days, exists, contains, not_contains
+# order_by fields: any numeric title field (popularity, bayes_rating, first_available_at, last_added_at, trending_rank, daily_shuffle...)
+
+pages:
+  home:
+    scope: {}
+    hero: featured
+    rows: [continue_watching, recently_added, new_episodes, trending, my_list, top_rated, modern_must_watch,
+           all_time_classics, critics_picks, by_language, collection_4k, anime_popular, hidden_gems, by_genre]
+  shows:
+    scope: { kind: show, tags: { not_contains: anime } }
+    hero: featured_any
+    rows: [new_episodes, trending_top10, recently_added, top_rated, by_language, by_genre]
+  movies:
+    scope: { kind: movie, tags: { not_contains: anime } }
+    hero: featured_any
+    rows: [recently_added, trending_top10, top_rated, modern_must_watch, all_time_classics, collection_4k, by_language, by_genre]
+  anime:
+    scope: { tags: { contains: anime } }
+    hero: featured_any
+    rows: [recently_added, new_episodes, trending, top_rated, anime_movies, by_genre]
+
+rows:
+  - { id: continue_watching, type: personal, kind: continue_watching, title: "Continue Watching", style: continue }
+  - { id: my_list, type: personal, kind: my_list, title: "My List" }
+
+  - id: featured
+    title: Featured
+    where: { card_backdrop_path: { exists: true }, logo_path: { exists: true }, trending_rank: { exists: true } }
+    order_by: [{ field: trending_rank, dir: asc }]
+    limit: 8
+    min_items: 1
+  - id: featured_any
+    title: Featured
+    where: { card_backdrop_path: { exists: true }, logo_path: { exists: true } }
+    order_by: [{ field: popularity }]
+    limit: 8
+    min_items: 1
+
+  - id: recently_added
+    title: Recently Added
+    where: { first_available_at: { within_days: 45 } }
+    order_by: [{ field: first_available_at }]
+    limit: 40
+  - id: new_episodes
+    title: New Episodes
+    where: { kind: show, last_added_at: { within_days: 21 } }
+    order_by: [{ field: last_added_at }]
+    limit: 30
+  - id: trending
+    title: Trending Now
+    where: { trending_rank: { exists: true } }
+    order_by: [{ field: trending_rank, dir: asc }]
+    limit: 20
+    min_items: 4
+  - id: trending_top10
+    title: Top 10 This Week
+    style: top10
+    where: { trending_rank: { exists: true } }
+    order_by: [{ field: trending_rank, dir: asc }]
+    limit: 10
+    min_items: 4
+  - id: top_rated
+    title: Top Rated
+    where: { tmdb_votes: { gte: 1500 } }
+    order_by: [{ field: bayes_rating }]
+    limit: 40
+  - id: modern_must_watch
+    title: Modern Must-Watches
+    where: { kind: movie, year: { gte: 2015 }, tmdb_rating: { gte: 7.3 }, tmdb_votes: { gte: 2000 } }
+    order_by: [{ field: bayes_rating }]
+    limit: 40
+  - id: all_time_classics
+    title: All-Time Classics
+    where: { kind: movie, year: { lte: 1999 }, tmdb_rating: { gte: 7.5 }, tmdb_votes: { gte: 3000 } }
+    order_by: [{ field: bayes_rating }]
+    limit: 40
+  - id: critics_picks
+    title: IMDb Top Picks
+    where: { tags: { contains: curated_imdb_top } }
+    order_by: [{ field: bayes_rating }]
+    limit: 50
+  - id: collection_4k
+    title: In Stunning 4K
+    where: { best_quality: "4K" }
+    order_by: [{ field: popularity }]
+    limit: 40
+  - id: anime_popular
+    title: Popular Anime
+    where: { tags: { contains: anime } }
+    order_by: [{ field: popularity }]
+    limit: 30
+  - id: anime_movies
+    title: Anime Movies
+    where: { kind: movie }
+    order_by: [{ field: popularity }]
+    limit: 30
+  - id: hidden_gems
+    title: Hidden Gems
+    where: { bayes_rating: { gte: 6.9 }, tmdb_votes: { gte: 100, lte: 1500 } }
+    order_by: [{ field: daily_shuffle }]
+    limit: 30
+  - id: by_language
+    title: "{language} Hits"
+    languages: [hi, ta, te, ml, ko, ja, en, bn]
+    order_by: [{ field: popularity }]
+    limit: 40
+  - id: by_genre
+    title: "{genre}"
+    max_rows: 8
+    order_by: [{ field: popularity }]
+    limit: 40

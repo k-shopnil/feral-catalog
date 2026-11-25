@@ -1,0 +1,34 @@
+# Storage servers and the folders ("roots") we index. Plan §5.2.
+# kind: movie | show | auto   (auto = decide per file)
+sources:
+  - id: ctgfun
+    base_url: https://movie.ctgfun.com/
+    max_concurrency: 6
+    user_agent: "Feral-Indexer/1.0"
+    roots:
+      - { path: "disk1/English Movies/", kind: movie, lang_hint: [en] }
+      - { path: "disk3/Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk4/South Indian Movies/", kind: movie }
+      - { path: "disk4/Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk5/4K Movies Collection/", kind: movie, tags: [collection_4k] }
+      - { path: "disk5/Rush Hour Trilogy/", kind: movie }
+      - { path: "disk6/TV Series Part Three/", kind: show }
+      - { path: "disk7/IMDB TOP MOVIES/", kind: movie, tags: [curated_imdb_top] }
+      - { path: "disk7/ANIME - PART TWO/", kind: show, tags: [anime], lang_hint: [ja, zh, ko] }
+      - { path: "disk7/Movie Series/", kind: movie }
+      - { path: "disk8/TV SERIES - PART TWO/", kind: show }
+      - { path: "disk8/A/", kind: auto }
+      - { path: "disk8/EXTRA/", kind: movie }
+      - { path: "disk9/TV SERIES/", kind: show }
+      - { path: "disk2/", kind: auto }
+      - { path: "disk6/", kind: auto }
+      - { path: "disk11/", kind: auto }
+    exclude:
+      - "disk5/GAMES PART TWO/"
+      - "disk5/ad/"
+      - "disk10/"
+      - "disk11/APP/"
+      - "disk6/Others/"
+      - "disk9/Others/"
+      - "streamx/"
+      - "**/.hls/"
