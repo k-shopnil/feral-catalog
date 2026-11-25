@@ -17,4 +17,7 @@ jobs:
       - name: Run reachability checks
         env:
           TMDB_READ_ACCESS: ${{ secrets.TMDB_READ_ACCESS }}
-        run: bash scripts/reachability.sh | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+        run: |
+          set -o pipefail
+          bash scripts/reachability.sh | tee -a "$GITHUB_STEP_SUMMARY"
