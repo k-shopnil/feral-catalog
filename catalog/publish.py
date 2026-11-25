@@ -19,16 +19,32 @@ ENTITIES = ("titles", "seasons", "episodes", "versions")
 SNAPSHOT_EVERY_CHANGES = 2000
 SNAPSHOT_EVERY_SECONDS = 24 * 3600
 KEEP_DAYS = 14
-SCHEMA = 1
+SCHEMA = 2  # 2 = NDJSON snapshots/deltas
 
 
 def _hash(obj) -> str:
     return hashlib.sha1(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+ENTITY_TAG = {"titles": "title", "seasons": "season", "episodes": "episode", "versions": "version"}
+
+
 def _write_gz(path: Path, obj) -> dict:
+    """Write a delta/snapshot as gzipped NDJSON so the TV can stream it line by line (2 GB RAM device).
+
+    Line 1: {"type":"header","from_version":a,"to_version":b}
+    Then:   {"t":"title|season|episode|version","op":"u","d":{...}}  or  {"t":...,"op":"d","id":"..."}
+    Order: titles, seasons, episodes, versions (parents before children).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    raw = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    lines = [json.dumps({"type": "header", "from_version": obj["from_version"], "to_version": obj["to_version"]})]
+    for e in ENTITIES:
+        tag = ENTITY_TAG[e]
+        for oid in obj[e]["delete"]:
+            lines.append(json.dumps({"t": tag, "op": "d", "id": oid}, separators=(",", ":")))
+        for d in obj[e]["upsert"]:
+            lines.append(json.dumps({"t": tag, "op": "u", "d": d}, separators=(",", ":"), ensure_ascii=False))
+    raw = ("\n".join(lines) + "\n").encode("utf-8")
     data = gzip.compress(raw, compresslevel=9, mtime=0)
     path.write_bytes(data)
     return {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
@@ -67,7 +83,7 @@ def publish(conn, cat: dict, rows: dict, run_info: dict) -> dict:
             payload = {"from_version": last, "to_version": version}
             for e in ENTITIES:
                 payload[e] = {"upsert": upserts[e], "delete": deletes[e]}
-            _write_gz(SITE / "delta" / f"{last}-{version}.json.gz", payload)
+            _write_gz(SITE / "delta" / f"{last}-{version}.ndjson.gz", payload)
         conn.executemany(
             "INSERT INTO published(entity,id,hash,version) VALUES(?,?,?,?) ON CONFLICT(entity,id) DO UPDATE SET hash=excluded.hash, version=excluded.version",
             [(e, oid, h, version) for e, oid, h in new_hashes],
@@ -86,16 +102,16 @@ def publish(conn, cat: dict, rows: dict, run_info: dict) -> dict:
             snap = {"from_version": 0, "to_version": version}
             for e in ENTITIES:
                 snap[e] = {"upsert": list(cat[e].values()), "delete": []}
-            _write_gz(SITE / "snapshot" / f"{version}.json.gz", snap)
+            _write_gz(SITE / "snapshot" / f"{version}.ndjson.gz", snap)
         conn.commit()
 
     # manifest (always rewritten)
     snap_row = conn.execute("SELECT version FROM catalog_version WHERE kind='snapshot' ORDER BY version DESC LIMIT 1").fetchone()
     snap_v = snap_row["version"] if snap_row else version
-    snap_path = SITE / "snapshot" / f"{snap_v}.json.gz"
+    snap_path = SITE / "snapshot" / f"{snap_v}.ndjson.gz"
     deltas = []
     for r in conn.execute("SELECT version FROM catalog_version WHERE version > ? ORDER BY version", (snap_v,)):
-        p = SITE / "delta" / f"{r['version'] - 1}-{r['version']}.json.gz"
+        p = SITE / "delta" / f"{r['version'] - 1}-{r['version']}.ndjson.gz"
         if p.exists():
             data = p.read_bytes()
             deltas.append({"from": r["version"] - 1, "to": r["version"], "url": f"delta/{p.name}",
@@ -112,7 +128,7 @@ def publish(conn, cat: dict, rows: dict, run_info: dict) -> dict:
         "schema": SCHEMA,
         "catalog_version": version,
         "generated_at": now,
-        "snapshot": {"version": snap_v, "url": f"snapshot/{snap_v}.json.gz",
+        "snapshot": {"version": snap_v, "url": f"snapshot/{snap_v}.ndjson.gz",
                      "sha256": hashlib.sha256(snap_bytes).hexdigest(), "bytes": len(snap_bytes)},
         "deltas": deltas,
         "rows": {"url": "rows.json", "version": rows["version"]},
@@ -129,7 +145,7 @@ def publish(conn, cat: dict, rows: dict, run_info: dict) -> dict:
 def _prune():
     cutoff = time.time() - KEEP_DAYS * 86400
     for sub in ("delta", "snapshot"):
-        files = sorted((SITE / sub).glob("*.json.gz"), key=lambda p: p.stat().st_mtime)
+        files = sorted((SITE / sub).glob("*.ndjson.gz"), key=lambda p: p.stat().st_mtime)
         for p in files[:-2]:  # always keep the newest two
             if p.stat().st_mtime < cutoff:
                 p.unlink(missing_ok=True)
