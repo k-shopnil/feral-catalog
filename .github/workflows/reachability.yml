@@ -1,0 +1,20 @@
+name: reachability
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg jq file > /dev/null
+      - name: Run reachability checks
+        env:
+          TMDB_READ_ACCESS: ${{ secrets.TMDB_READ_ACCESS }}
+        run: bash scripts/reachability.sh | tee -a "$GITHUB_STEP_SUMMARY"

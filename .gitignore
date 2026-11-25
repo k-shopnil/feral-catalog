@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+*.db
+*.db-wal
+*.db-shm
+*.db.zst
+site/
+*.log
+.DS_Store
+Thumbs.db
