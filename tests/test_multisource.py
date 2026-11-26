@@ -64,6 +64,10 @@ def test_sources_yaml_keeps_primary_unprefixed_and_namespaces_the_rest():
     assert source_of(srcs, "disk1/English Movies/x.mkv").id == "ctgfun"
     assert source_of(srcs, "data:disk1/disk1/x.mkv").id == "data"
     assert source_of(srcs, "ftp:English/x.mkv").id == "ftp"
+    # dl/media (MCU Fest titles live there) come last, so existing servers keep winning duplicates.
+    assert [s.id for s in srcs] == ["ctgfun", "data", "ftp", "dl", "media"]
+    assert source_of(srcs, "dl:disk1/English Movies/2019/x.mp4").id == "dl"
+    assert source_of(srcs, "media:disk2/English Movies (2015)/x.mkv").id == "media"
 
 
 # ---------------- crawler ----------------

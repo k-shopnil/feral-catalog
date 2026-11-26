@@ -19,7 +19,8 @@ Phase 1 gate: the `reachability` workflow checks that GitHub runners can reach t
 ## Storage servers
 
 `config/sources.yaml` lists every server and the folders indexed on each: `movie.ctgfun.com` (Apache),
-`data.ctgfun.com` and `ftp.ctgfun.com` (nginx; both listing formats are parsed). Each run crawls them in turn.
+`data.ctgfun.com`, `ftp.ctgfun.com`, `dl.ctgfun.com` and `media.ctgfun.com` (nginx; both listing formats are
+parsed). Each run crawls them in turn, in that order, which is also the duplicate-preference order.
 
 - The first server keeps un-prefixed state paths (`disk1/English Movies/...`), so its `state.db` rows, work keys,
   `overrides.yaml` patterns and published version ids are the same as before multi-source support. Every other
@@ -27,7 +28,7 @@ Phase 1 gate: the `reachability` workflow checks that GitHub runners can reach t
   folder names. No migration: an older indexer simply ignores the namespaced rows.
 - Copies of one title on several servers are matched once and published as versions of the same title/episode.
   A file with the same name as one on a higher server is skipped; other servers' versions get
-  `· Data server` / `· FTP server` appended to their label.
+  `· Data server` / `· FTP server` / `· DL server` / `· Media server` appended to their label.
 - A server that is down is skipped for that run (a failed listing never marks files missing). The phone app's
   connection check only requires the first server.
 

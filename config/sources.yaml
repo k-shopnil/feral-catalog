@@ -104,3 +104,72 @@ sources:
       - "Others/App/"
       - "**/GAMES/"
       - "**/.hls/"
+
+  # nginx autoindex (same listing format as data/ftp). ctgmovies.com streams part of its catalog from here;
+  # added for the MCU Fest titles that only live on dl/media (Guardians of the Galaxy 2014, Ant-Man 2015,
+  # Ant-Man and the Wasp, Captain Marvel). Only listed roots are crawled; games/apps/apk folders are left out.
+  - id: dl
+    base_url: https://dl.ctgfun.com/
+    label: "DL server"
+    max_concurrency: 6
+    user_agent: "Feral-Indexer/1.0"
+    roots:
+      - { path: "disk1/English Movies/", kind: movie, lang_hint: [en] }
+      - { path: "disk2/Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk2/South Indian Movies/", kind: movie }
+      - { path: "disk3/Asian Movies/", kind: movie }
+      - { path: "disk3/Bengali Movies/", kind: movie, lang_hint: [bn] }
+      - { path: "disk3/EXTRA/", kind: movie }
+      - { path: "disk3/European Movies/", kind: movie }
+      - { path: "disk3/MOVIE SERIES/", kind: movie }
+      - { path: "disk3/Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk5/TV Series Collection/", kind: show }
+      - { path: "disk6/English Movies (2014 & Old)/", kind: movie, lang_hint: [en] }
+      - { path: "disk6/English Movies (2015)/", kind: movie, lang_hint: [en] }
+      - { path: "disk6/REM/", kind: movie }
+      - { path: "disk6/ST/", kind: movie }
+      - { path: "disk6/TV Series Collection (Part Two)/", kind: show }
+    exclude:
+      - "**/GAMES/"
+      - "**/lost+found/"
+      - "**/.hls/"
+
+  # nginx autoindex. Overlaps heavily with dl (same English 2014/2015 folders); duplicates are merged by
+  # the cross-server dedupe, keeping the earlier server's copy.
+  - id: media
+    base_url: https://media.ctgfun.com/
+    label: "Media server"
+    max_concurrency: 6
+    user_agent: "Feral-Indexer/1.0"
+    roots:
+      - { path: "disk1/Recent English Movies/", kind: movie, lang_hint: [en] }
+      - { path: "disk2/English Movies (2014 & Old)/", kind: movie, lang_hint: [en] }
+      - { path: "disk2/English Movies (2015)/", kind: movie, lang_hint: [en] }
+      - { path: "disk2/English Movies (2016)/", kind: movie, lang_hint: [en] }
+      - { path: "disk2/aa/", kind: movie }
+      - { path: "disk3/", kind: auto }
+      - { path: "disk3/Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk4/IMDb Top 250 Movies/", kind: movie, tags: [curated_imdb_top] }
+      - { path: "disk4/Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk4/South Indian Movies/", kind: movie }
+      - { path: "disk5/EXTRA/", kind: movie }
+      - { path: "disk5/MOVIE SERIES/", kind: movie }
+      - { path: "disk5/TV SERIES [PART-3]/", kind: show }
+      - { path: "disk6/Asian Movies/", kind: movie }
+      - { path: "disk6/Bengali Movies/", kind: movie, lang_hint: [bn] }
+      - { path: "disk6/European Movies/", kind: movie }
+      - { path: "disk6/Kingdom Trilogy (2019-2023) 1080p BluRay AAC 6CH x264-Pahe/", kind: movie }
+      - { path: "disk7/", kind: auto }
+      - { path: "disk7/KENE BACKUP/", kind: movie }
+      - { path: "disk7/TV SERIES [PART-4]/", kind: show }
+      - { path: "disk7/backup_disk9/", kind: show }
+      - { path: "disk8/TV SERIES [PART-2]/", kind: show }
+      - { path: "disk11/4K Movies Collection/", kind: movie, tags: [collection_4k] }
+    exclude:
+      - "disk7/PDF/"
+      - "disk7/Software/"
+      - "disk7/Tutorial/"
+      - "disk7/GAMES EX/"
+      - "**/GAMES/"
+      - "**/lost+found/"
+      - "**/.hls/"
