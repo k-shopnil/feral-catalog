@@ -29,3 +29,12 @@
   expect: { kind: special }
 - name: "The.95th.Annual.Academy.Awards.2023.1080p.HDTV.x265 [DDN].mkv"
   expect: { kind: special }
+# Bigg Boss season folders on data/ftp.ctgfun.com (2026-11-26): episode tag glued to the show abbreviation.
+- name: "BBS17EP1 Grand Premiere.mkv"
+  expect: { kind: episode, season: 17, episode: 1 }
+- name: "BBS18EP01 GRAND PREMIERE.mkv"
+  expect: { kind: episode, season: 18, episode: 1 }
+- name: "BBS17EP10.mkv"
+  expect: { kind: episode, season: 17, episode: 10 }
+- name: "Bigg.Boss.S16.E01.1.OCT.GRAND.PREMIERE.720p.WEB-DL.x264 [DDN].mkv"
+  expect: { kind: episode, season: 16, episode: 1 }

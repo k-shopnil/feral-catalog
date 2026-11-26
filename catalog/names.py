@@ -27,6 +27,10 @@ _SXXEXX = re.compile(r"\bS(\d{1,2})[ ._-]?E(\d{1,3})(?:v\d)?(?:[ ._-]?-?E(\d{1,3
 # "Title (YYYY)" / "Title [YYYY]": everything before the bracketed year is the title (guessit splits on " - ").
 _TITLE_BEFORE_YEAR = re.compile(r"^(.+?)[\s.]*[(\[]((?:19|20)\d{2})[)\]]")
 _SEASON_FOLDER = re.compile(r"(?:\bS(\d{1,2})\b|\bSeason[ ._-]?(\d{1,2})\b)", re.I)
+# Episode tags glued to a show abbreviation: "BBS17EP10 Grand Premiere.mkv" (Bigg Boss), "KWKS08E01".
+_GLUED_SXXEPXX = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{1,5}S(\d{1,2})[ ._-]?EP?[ ._-]?(\d{1,3})(?![0-9])", re.I)
+# A season tag ending a show folder name: "Bigg Boss S15", "BIGG BOSS S16", "Show Season 2" (TMDB has no such title).
+_TRAILING_SEASON = re.compile(r"[\s._-]+(?:S|Season[\s._-]?)\d{1,2}$", re.I)
 _ABS_EP = re.compile(r"\s-\s(\d{1,4})(?:v\d)?\b")
 _SPECIAL_WORDS = re.compile(
     r"\b(WWE|UFC|WrestleMania|SmackDown|Monday Night Raw|PPV|Hell in a Cell|Money in the Bank|Royal Rumble|"
@@ -185,6 +189,10 @@ def parse_release(name: str, prefer: str | None = None) -> Parsed:
             p.episode = e
         elif isinstance(e, list) and e:
             p.episode, p.episode_end = int(e[0]), int(e[-1])
+    if p.episode is None:
+        m = _GLUED_SXXEPXX.search(clean)
+        if m:
+            p.season, p.episode = int(m.group(1)), int(m.group(2))
     et = g.get("episode_title")
     if et:
         p.episode_title = str(et)
@@ -216,8 +224,14 @@ def season_from_folder(folder: str) -> int | None:
     return None
 
 
+def strip_season_suffix(title: str) -> str:
+    """'Bigg Boss S15' -> 'Bigg Boss'. Leaves titles that are only a season tag alone."""
+    t = _TRAILING_SEASON.sub("", title).strip(" -._")
+    return t or title
+
+
 def show_title_from_folder(folder: str) -> tuple[str, int | None]:
-    s = normalize(folder)
+    s = strip_season_suffix(normalize(folder))
     s = re.sub(r"\s*\((OVA|OAD|Specials?)\)\s*$", "", s, flags=re.I)
     year = None
     m = re.search(r"\((\d{4})\)", s)

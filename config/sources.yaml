@@ -1,7 +1,17 @@
 # Storage servers and the folders ("roots") we index. Plan §5.2.
-# kind: movie | show | auto   (auto = decide per file)
+# kind: movie | show | auto   (auto = decide per file; only `show` changes behaviour: show folders are
+#                              re-listed every run and their episodes group under the show folder)
+#
+# Order matters:
+# - The first source keeps un-prefixed state paths (path_prefix: ""), so the state.db rows, work keys,
+#   overrides.yaml patterns and published version ids made before multi-source support stay valid.
+# - Every other source's state paths are namespaced "<id>:" (data:disk1/...), because the servers reuse the same
+#   folder names (disk1/ .. disk11/). Paths in roots/exclude below are always relative to that server's base_url.
+# - When the same release (same TMDB title + episode + file name) is on several servers, only the first server's
+#   copy is published. Other servers' versions get " · <label>" appended to their label in the app.
 sources:
   - id: ctgfun
+    path_prefix: ""
     base_url: https://movie.ctgfun.com/
     max_concurrency: 6
     user_agent: "Feral-Indexer/1.0"
@@ -31,4 +41,66 @@ sources:
       - "disk6/Others/"
       - "disk9/Others/"
       - "streamx/"
+      - "**/.hls/"
+
+  # nginx autoindex. Each diskN/ (N = 1, 10, 11) nests its content one level deeper (disk1/disk1/...).
+  # disk2/ is empty. Times in the listings are server local time, like movie.ctgfun.com.
+  - id: data
+    base_url: https://data.ctgfun.com/
+    label: "Data server"
+    max_concurrency: 6
+    user_agent: "Feral-Indexer/1.0"
+    roots:
+      - { path: "disk1/disk1/", kind: auto }
+      - { path: "disk1/disk1/NEW Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk1/disk1/New Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk3/", kind: auto }
+      - { path: "disk3/New Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk3/New Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk4/ENGLISH EXTRA/", kind: movie }
+      - { path: "disk4/Indian-Bangla-Movie/", kind: movie, lang_hint: [bn] }
+      - { path: "disk4/TV/", kind: show }
+      - { path: "disk5/TV SERIES/", kind: show }
+      - { path: "disk6/", kind: auto }
+      - { path: "disk6/New Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk6/New Pakistani Movies/", kind: movie, lang_hint: [ur] }
+      - { path: "disk7/", kind: auto }
+      - { path: "disk7/IMDb Top 250 Movies/", kind: movie, tags: [curated_imdb_top] }
+      - { path: "disk7/TV SERIES/", kind: show }
+      - { path: "disk8/", kind: auto }
+      - { path: "disk8/HINDI MOVIES [2015 & OLD]/", kind: movie, lang_hint: [hi] }
+      - { path: "disk9/", kind: auto }
+      - { path: "disk9/Bollywood/", kind: movie, lang_hint: [hi] }
+      - { path: "disk10/disk10/", kind: auto }
+      - { path: "disk10/disk10/New Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "disk10/disk10/MOVIES 1080p/HINDI/", kind: movie, lang_hint: [hi] }
+      - { path: "disk11/disk11/", kind: auto }
+      - { path: "disk11/disk11/TV SERIES - PART THREE/", kind: show }
+    exclude:
+      - "disk11/disk11/Office/"
+      - "disk11/disk11/zip/"
+      - "**/GAMES/"
+      - "**/Apps/"
+      - "**/APP/"
+      - "**/DDN-AD/"
+      - "**/lost+found/"
+      - "**/.hls/"
+
+  # nginx autoindex. Newest uploads land here first (English/ and TV_Series/ change daily).
+  - id: ftp
+    base_url: https://ftp.ctgfun.com/
+    label: "FTP server"
+    max_concurrency: 6
+    user_agent: "Feral-Indexer/1.0"
+    roots:
+      - { path: "English/", kind: movie, lang_hint: [en] }
+      - { path: "Indian/Hindi Movies/", kind: movie, lang_hint: [hi] }
+      - { path: "Indian/South Indian Movies/", kind: movie }
+      - { path: "Others/", kind: auto }
+      - { path: "Others/4K MOVIES/", kind: movie, tags: [collection_4k] }
+      - { path: "Others/IMDB TOP MOVIES/", kind: movie, tags: [curated_imdb_top] }
+      - { path: "TV_Series/", kind: show }
+    exclude:
+      - "Others/App/"
+      - "**/GAMES/"
       - "**/.hls/"

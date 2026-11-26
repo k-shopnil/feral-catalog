@@ -12,7 +12,7 @@ from datetime import date
 
 from . import aot
 from .names import LANG_WORDS
-from .settings import load_yaml
+from .settings import load_sources, load_yaml, source_of
 from .tmdb import Tmdb
 
 log = logging.getLogger("build")
@@ -92,6 +92,25 @@ def _health(size: int | None, runtime_min: int | None, kind: str) -> str:
     return "ok"
 
 
+def _with_server(label: str, server: str | None) -> str:
+    return f"{label} · {server}" if server else label
+
+
+def _drop_cross_source_duplicates(rows: list, src_of: dict) -> list:
+    """The same release (same TMDB title, season/episode and file name) on several servers is published once,
+    from the highest-priority server that has it. Files within one server are never collapsed (unchanged
+    behaviour for the primary server, whose versions and ids predate multi-source support)."""
+    def key(r):
+        return (r["wkind"], r["tmdb_id"], r["season"], r["episode"], r["name"].casefold())
+
+    best: dict = {}
+    for r in rows:
+        k, p = key(r), src_of[r["path"]].priority
+        if p < best.get(k, 1 << 30):
+            best[k] = p
+    return [r for r in rows if src_of[r["path"]].priority == best[key(r)]]
+
+
 def trending(tmdb: Tmdb) -> dict[str, int]:
     ranks: dict[str, int] = {}
     n = 0
@@ -117,6 +136,9 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         "AND w.status IN ('auto','auto_low','manual') AND w.tmdb_id IS NOT NULL",
         (aot.AOT_WORK_KEY,),
     ).fetchall()
+    sources = load_sources()
+    src_of = {r["path"]: source_of(sources, r["path"]) for r in rows}
+    rows = _drop_cross_source_duplicates(rows, src_of)
     subs_by_dir = defaultdict(list)
     for s in conn.execute("SELECT name,url,dir_path FROM file WHERE role='subtitle' AND missing_since IS NULL"):
         subs_by_dir[s["dir_path"]].append(s)
@@ -201,7 +223,9 @@ def build(conn, tmdb: Tmdb | None) -> dict:
             "video_codec": p.get("video_codec"), "hdr": p.get("hdr"), "bit_depth": p.get("bit_depth"),
             "audio_hint": p.get("audio_hint"), "languages": langs, "dual_audio": bool(p.get("dual_audio")),
             "cam": bool(p.get("cam")), "edition": p.get("edition"), "episode_end": r["episode_end"],
-            "external_subs": subs, "label": _label(p, langs), "quality_score": _quality_score(p),
+            "external_subs": subs, "label": _with_server(_label(p, langs), src_of[r["path"]].label),
+            # minus the server priority: on equal quality the app's best-version pick stays on the first server
+            "quality_score": _quality_score(p) - src_of[r["path"]].priority,
             "health": health, "probe": "filename", "added_at": r["added_at"] or r["first_seen_at"],
         }
         t_versions[tid].append(versions[vid])

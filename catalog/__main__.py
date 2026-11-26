@@ -38,17 +38,26 @@ from .enrich import enrich
 from .match import match_works
 from .process import process_files
 from .publish import ensure_not_behind, fetch_remote_manifest, publish, push_pages, sync_site_from_pages
-from .settings import DATA, REPORTS, load_source, setup_logging, tmdb_token
+from .settings import DATA, REPORTS, load_sources, setup_logging, tmdb_token
 from .tmdb import Tmdb
 
 log = logging.getLogger("catalog")
 
 
 def cmd_crawl(conn, args):
-    src = load_source()
-    stats = Crawler(conn, src).run(only_roots=args.root, full=args.full)
-    log.info("crawl: %s", stats)
-    return stats
+    """Crawl every source in sources.yaml in turn. Returns summed stats plus per-source stats under "sources"."""
+    total: dict = {}
+    per: dict = {}
+    for src in load_sources():
+        if args.root and not any(r.path.startswith(o) for r in src.roots for o in args.root):
+            continue
+        stats = Crawler(conn, src).run(only_roots=args.root, full=args.full)
+        log.info("crawl %s: %s", src.id, stats)
+        per[src.id] = stats
+        for k, v in stats.items():
+            total[k] = total.get(k, 0) + v
+    total["sources"] = per
+    return total
 
 
 def cmd_report(conn, _args=None):
@@ -73,15 +82,15 @@ def cmd_report(conn, _args=None):
 
 
 def cmd_doctor(_conn, _args=None):
-    src = load_source()
     ok = True
-    try:
-        r = httpx.get(src.base_url, headers={"User-Agent": src.user_agent}, timeout=20)
-        print(f"storage server: HTTP {r.status_code} ({len(r.text)} bytes)")
-        ok &= r.status_code == 200
-    except Exception as e:  # noqa: BLE001
-        print(f"storage server: FAILED {e}")
-        ok = False
+    for src in load_sources():
+        try:
+            r = httpx.get(src.base_url, headers={"User-Agent": src.user_agent}, timeout=20)
+            print(f"storage server {src.id} ({src.base_url}): HTTP {r.status_code} ({len(r.text)} bytes)")
+            ok &= r.status_code == 200
+        except Exception as e:  # noqa: BLE001
+            print(f"storage server {src.id} ({src.base_url}): FAILED {e}")
+            ok = False
     try:
         r = httpx.get("https://api.themoviedb.org/3/authentication",
                       headers={"Authorization": f"Bearer {tmdb_token()}"}, timeout=20)
@@ -144,7 +153,7 @@ def cmd_run(conn, args, pusher=push_pages, on_stage=_no_stage):
     crawl = cmd_crawl(conn, args)
     on_stage("crawl", "done", crawl)
     on_stage("process", "start")
-    proc = process_files(conn, load_source())
+    proc = process_files(conn, load_sources())
     log.info("process: %s", proc)
     on_stage("process", "done", proc)
     tmdb = Tmdb(conn)
@@ -294,7 +303,7 @@ def main(argv=None):
     if args.command == "crawl":
         cmd_crawl(conn, args)
     elif args.command == "process":
-        log.info("process: %s", process_files(conn, load_source(), limit=args.limit))
+        log.info("process: %s", process_files(conn, load_sources(), limit=args.limit))
     elif args.command == "match":
         tmdb = Tmdb(conn)
         log.info("match: %s", match_works(conn, tmdb, limit=args.limit))

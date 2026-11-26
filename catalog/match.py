@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from rapidfuzz import fuzz
 
-from .names import norm_key
+from .names import norm_key, strip_season_suffix
 from .settings import load_yaml
 from .tmdb import Tmdb
 
@@ -44,6 +44,8 @@ def _variants(title: str) -> list[str]:
             out.append(title[: -len(k) + 1] + v.strip())
     if "&" in title:
         out.append(title.replace("&", "and"))
+    # works created before folder titles dropped their season tag ("Bigg Boss S15") still search as "Bigg Boss"
+    out.append(strip_season_suffix(title))
     return [o for i, o in enumerate(out) if o and o not in out[:i]]
 
 

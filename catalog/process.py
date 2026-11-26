@@ -7,22 +7,26 @@ import re
 import time
 
 from .names import norm_key, parse_release, season_from_folder, show_title_from_folder
-from .settings import Root, Source
+from .settings import Root, Source, all_roots
 
 log = logging.getLogger("process")
 
 _YEAR_DIR = re.compile(r"^(19|20)\d{2}$")
 
 
-def _root_of(src: Source, path: str) -> Root | None:
+def _roots(src: Source | list[Source]) -> list[Root]:
+    return src.roots if isinstance(src, Source) else all_roots(src)
+
+
+def _root_of(src: Source | list[Source], path: str) -> Root | None:
     best = None
-    for r in src.roots:
+    for r in _roots(src):
         if path.startswith(r.path) and (best is None or len(r.path) > len(best.path)):
             best = r
     return best
 
 
-def classify_file(src: Source, path: str, name: str) -> dict | None:
+def classify_file(src: Source | list[Source], path: str, name: str) -> dict | None:
     root = _root_of(src, path)
     if root is None:
         return None
@@ -41,7 +45,8 @@ def classify_file(src: Source, path: str, name: str) -> dict | None:
         title, year = show_title_from_folder(show_folder)
         season = fp.season
         if season is None:
-            for f in reversed(folders[1:]):
+            # nearest folder first, the show folder last ("BIGG BOSS S17/BBS17EP1.mkv" -> season 17, not 1)
+            for f in reversed(folders):
                 season = season_from_folder(f)
                 if season is not None:
                     break
@@ -103,7 +108,7 @@ def classify_file(src: Source, path: str, name: str) -> dict | None:
     }
 
 
-def process_files(conn, src: Source, limit: int | None = None) -> dict:
+def process_files(conn, src: Source | list[Source], limit: int | None = None) -> dict:
     now = int(time.time())
     rows = conn.execute(
         "SELECT path,name FROM file WHERE role='video' AND stable=1 AND parsed=0 AND missing_since IS NULL"

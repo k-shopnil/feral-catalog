@@ -84,7 +84,7 @@ def _checks(listener, github_token: str, publish: bool) -> bool:
     from .crawler import _quote_seg
     from .db import DB_PATH, connect
     from .publish import fetch_remote_manifest, local_catalog_version
-    from .settings import PAGES_BRANCH, PAGES_REPO_SLUG, fanart_key, load_source, tmdb_token
+    from .settings import PAGES_BRANCH, PAGES_REPO_SLUG, fanart_key, load_sources, tmdb_token
 
     log = logging.getLogger("checks")
     ok_all = True
@@ -96,37 +96,47 @@ def _checks(listener, github_token: str, publish: bool) -> bool:
         (log.info if status != "fail" else log.error)("%s: %s - %s", label, status.upper(), detail)
         listener.onCheck(cid, label, status, detail)
 
-    src = load_source()
-    ua = {"User-Agent": src.user_agent}
+    from .autoindex import parse_listing
 
-    # 1. storage server root listing
-    t0 = time.monotonic()
-    try:
-        r = httpx.get(src.base_url, headers=ua, timeout=httpx.Timeout(20.0, connect=10.0))
-        disks = len(set(re.findall(r'href="(disk\d+/)"', r.text)))
-        ms = int((time.monotonic() - t0) * 1000)
-        if r.status_code == 200 and disks:
-            report("storage", "Storage server", "ok", f"{src.base_url} HTTP 200 in {ms} ms, {disks} disks listed")
-        else:
-            report("storage", "Storage server", "fail", f"{src.base_url} HTTP {r.status_code}, {disks} disks in listing")
-    except Exception as e:  # noqa: BLE001
-        report("storage", "Storage server", "fail",
-               f"{src.base_url} not reachable from this network ({type(e).__name__}: {e}). "
-               "The server is only reachable from BDIX-connected networks.")
+    # 1-2. each storage server: its root page, then one indexed folder (proves deep paths list, not only the
+    # root page). Only the primary server is required; another server being down skips its files this run
+    # (a failed listing never marks anything missing).
+    for src in load_sources():
+        ua = {"User-Agent": src.user_agent}
+        primary = src.priority == 0
+        sid = "storage" if primary else f"storage_{src.id}"
+        label = "Storage server" if primary else f"Storage server ({src.label or src.id})"
+        down = "fail" if primary else "skip"
+        t0 = time.monotonic()
+        try:
+            r = httpx.get(src.base_url, headers=ua, timeout=httpx.Timeout(20.0, connect=10.0))
+            entries = len(parse_listing(r.text)) if r.status_code == 200 else 0
+            ms = int((time.monotonic() - t0) * 1000)
+            if r.status_code == 200 and entries:
+                report(sid, label, "ok", f"{src.base_url} HTTP 200 in {ms} ms, {entries} folders listed")
+            else:
+                report(sid, label, down, f"{src.base_url} HTTP {r.status_code}, {entries} folders in listing")
+                continue
+        except Exception as e:  # noqa: BLE001
+            report(sid, label, down,
+                   f"{src.base_url} not reachable from this network ({type(e).__name__}: {e}). "
+                   "The server is only reachable from BDIX-connected networks.")
+            continue
 
-    # 2. one indexed folder (proves deep paths list, not only the root page)
-    root = src.roots[0]
-    url = src.base_url + "/".join(_quote_seg(p) for p in root.path.rstrip("/").split("/")) + "/"
-    t0 = time.monotonic()
-    try:
-        r = httpx.get(url, headers=ua, timeout=httpx.Timeout(60.0, connect=10.0))
-        ms = int((time.monotonic() - t0) * 1000)
-        if r.status_code == 200:
-            report("folder", "Indexed folder", "ok", f"{root.path} HTTP 200, {len(r.content) // 1024} KB in {ms} ms")
-        else:
-            report("folder", "Indexed folder", "fail", f"{root.path} HTTP {r.status_code}")
-    except Exception as e:  # noqa: BLE001
-        report("folder", "Indexed folder", "fail", f"{root.path}: {type(e).__name__}: {e}")
+        root = src.roots[0]
+        url = src.base_url + "/".join(_quote_seg(p) for p in root.rel.rstrip("/").split("/")) + "/"
+        fid = "folder" if primary else f"folder_{src.id}"
+        flabel = "Indexed folder" if primary else f"Indexed folder ({src.label or src.id})"
+        t0 = time.monotonic()
+        try:
+            r = httpx.get(url, headers=ua, timeout=httpx.Timeout(60.0, connect=10.0))
+            ms = int((time.monotonic() - t0) * 1000)
+            if r.status_code == 200:
+                report(fid, flabel, "ok", f"{root.rel} HTTP 200, {len(r.content) // 1024} KB in {ms} ms")
+            else:
+                report(fid, flabel, down, f"{root.rel} HTTP {r.status_code}")
+        except Exception as e:  # noqa: BLE001
+            report(fid, flabel, down, f"{root.rel}: {type(e).__name__}: {e}")
 
     # 3. TMDB
     try:

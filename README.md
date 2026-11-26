@@ -16,6 +16,21 @@ It runs on a schedule in GitHub Actions. No video is stored or proxied here: the
 
 Phase 1 gate: the `reachability` workflow checks that GitHub runners can reach the storage server and TMDB.
 
+## Storage servers
+
+`config/sources.yaml` lists every server and the folders indexed on each: `movie.ctgfun.com` (Apache),
+`data.ctgfun.com` and `ftp.ctgfun.com` (nginx; both listing formats are parsed). Each run crawls them in turn.
+
+- The first server keeps un-prefixed state paths (`disk1/English Movies/...`), so its `state.db` rows, work keys,
+  `overrides.yaml` patterns and published version ids are the same as before multi-source support. Every other
+  server's paths are namespaced `<id>:` (`data:disk1/disk1/...`, `ftp:English/...`) because the servers reuse
+  folder names. No migration: an older indexer simply ignores the namespaced rows.
+- Copies of one title on several servers are matched once and published as versions of the same title/episode.
+  A file with the same name as one on a higher server is skipped; other servers' versions get
+  `· Data server` / `· FTP server` appended to their label.
+- A server that is down is skipped for that run (a failed listing never marks files missing). The phone app's
+  connection check only requires the first server.
+
 ## Secrets
 
 - `TMDB_READ_ACCESS` (Actions secret): TMDB API Read Access Token. Never commit it. For local runs, put it in a `.env` file (see `.env.example`).
