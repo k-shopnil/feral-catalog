@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import struct
 import threading
 import time
+import zlib
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -19,8 +22,12 @@ SEASON_TTL_ENDED = 30 * 86400
 SEASON_TTL_ONGOING = 86400
 CERT_COUNTRIES = ("US", "IN", "GB")
 IMAGE_LANGS = "en,null,hi,ta,te,ml,kn,bn,ja,ko,zh,es,fr,de,tr,ar,ru,id,th,pt,it"
+TMDB_LOGO_CHECK_BASE = "https://image.tmdb.org/t/p/w185"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _fanart_lock = threading.Lock()
 _fanart_http: httpx.Client | None = None
+_img_lock = threading.Lock()
+_img_http: httpx.Client | None = None
 
 
 def _fanart_client() -> httpx.Client:
@@ -34,23 +41,205 @@ def _fanart_client() -> httpx.Client:
         return _fanart_http
 
 
-def _best_image(items: list[dict], langs: tuple) -> str | None:
+def _img_client() -> httpx.Client:
+    global _img_http
+    with _img_lock:
+        if _img_http is None:
+            _img_http = httpx.Client(
+                timeout=httpx.Timeout(6.0, connect=3.0),
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=16),
+            )
+        return _img_http
+
+
+def _png_is_dark(data: bytes) -> bool:
+    """Return True if a decoded PNG's visible pixels are nearly all black/dark (unreadable on dark UI).
+
+    Uses pure stdlib (no Pillow) so it runs identically on PC and Chaquopy Android. Fails open (False)
+    on non-PNG formats, malformed streams, interlaced images, or transparent-empty images.
+    """
+    if len(data) < 33 or not data.startswith(_PNG_SIGNATURE):
+        return False
+    pos = 8
+    ihdr = None
+    plte = b""
+    trns = b""
+    idat = bytearray()
+    while pos + 12 <= len(data):
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        ctype = data[pos + 4:pos + 8]
+        cdata = data[pos + 8:pos + 8 + length]
+        if len(cdata) != length:
+            break
+        if ctype == b"IHDR" and length == 13:
+            ihdr = cdata
+        elif ctype == b"PLTE":
+            plte = cdata
+        elif ctype == b"tRNS":
+            trns = cdata
+        elif ctype == b"IDAT":
+            idat.extend(cdata)
+        elif ctype == b"IEND":
+            break
+        pos += 12 + length
+
+    if not ihdr or not idat:
+        return False
+    width, height, bit_depth, color_type, comp, flt, interlace = struct.unpack(">IIBBBBB", ihdr)
+    if width <= 0 or height <= 0 or comp != 0 or flt != 0 or interlace != 0:
+        return False
+    if bit_depth not in (8, 16) or color_type not in (0, 2, 3, 4, 6):
+        return False
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color_type]
+    if color_type == 3 and (bit_depth != 8 or len(plte) < 3):
+        return False
+
+    bytes_per_ch = bit_depth // 8
+    bpp = channels * bytes_per_ch
+    stride = width * bpp
+    expected_len = height * (1 + stride)
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except zlib.error:
+        return False
+    if len(raw) < expected_len:
+        return False
+
+    prev_row = bytearray(stride)
+    lums: list[float] = []
+    peaks: list[int] = []
+    idx = 0
+    for _ in range(height):
+        ftype = raw[idx]
+        idx += 1
+        row = bytearray(raw[idx:idx + stride])
+        idx += stride
+        if ftype == 1:
+            for i in range(bpp, stride):
+                row[i] = (row[i] + row[i - bpp]) & 0xFF
+        elif ftype == 2:
+            for i in range(stride):
+                row[i] = (row[i] + prev_row[i]) & 0xFF
+        elif ftype == 3:
+            for i in range(stride):
+                left = row[i - bpp] if i >= bpp else 0
+                row[i] = (row[i] + ((left + prev_row[i]) >> 1)) & 0xFF
+        elif ftype == 4:
+            for i in range(stride):
+                a = row[i - bpp] if i >= bpp else 0
+                b = prev_row[i]
+                c = prev_row[i - bpp] if i >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                row[i] = (row[i] + pr) & 0xFF
+        elif ftype != 0:
+            return False
+
+        step = bytes_per_ch
+        if color_type == 6:  # RGBA
+            for x in range(0, stride, 4 * step):
+                a = row[x + 3 * step]
+                if a >= 32:
+                    r, g, b = row[x], row[x + step], row[x + 2 * step]
+                    lums.append(0.299 * r + 0.587 * g + 0.114 * b)
+                    peaks.append(max(r, g, b))
+        elif color_type == 4:  # Grayscale + Alpha
+            for x in range(0, stride, 2 * step):
+                a = row[x + step]
+                if a >= 32:
+                    g = row[x]
+                    lums.append(float(g))
+                    peaks.append(g)
+        elif color_type == 3:  # Indexed palette
+            for x in range(stride):
+                ci = row[x]
+                pi = ci * 3
+                if pi + 2 >= len(plte):
+                    continue
+                a = trns[ci] if ci < len(trns) else 255
+                if a >= 32:
+                    r, g, b = plte[pi], plte[pi + 1], plte[pi + 2]
+                    lums.append(0.299 * r + 0.587 * g + 0.114 * b)
+                    peaks.append(max(r, g, b))
+        elif color_type == 2:  # RGB (opaque)
+            for x in range(0, stride, 3 * step):
+                r, g, b = row[x], row[x + step], row[x + 2 * step]
+                lums.append(0.299 * r + 0.587 * g + 0.114 * b)
+                peaks.append(max(r, g, b))
+        else:  # Grayscale (opaque)
+            for x in range(0, stride, step):
+                g = row[x]
+                lums.append(float(g))
+                peaks.append(g)
+        prev_row = row
+
+    if not lums:
+        return False
+    mean_lum = sum(lums) / len(lums)
+    lums.sort()
+    peaks.sort()
+    p90_idx = int((len(lums) - 1) * 0.90)
+    return mean_lum < 45.0 and lums[p90_idx] < 65.0 and peaks[p90_idx] < 70
+
+
+def _is_dark_logo_url(url: str) -> bool:
+    """Download a small logo thumbnail and detect whether it is near-black (fail-open on network errors)."""
+    try:
+        r = _img_client().get(url)
+        if r.status_code != 200:
+            return False
+        return _png_is_dark(r.content)
+    except httpx.HTTPError:
+        return False
+
+
+def _is_dark_tmdb_logo(file_path: str) -> bool:
+    if not file_path or file_path.lower().endswith(".svg"):
+        return False
+    return _is_dark_logo_url(f"{TMDB_LOGO_CHECK_BASE}{file_path}")
+
+
+def _ranked_images(items: list[dict], langs: tuple) -> list[str]:
+    ranked: list[str] = []
     for lang in langs:
         pool = [i for i in items if i.get("iso_639_1") == lang and i.get("file_path")]
         if pool:
             pool.sort(key=lambda i: (i.get("vote_average") or 0, i.get("vote_count") or 0, i.get("width") or 0), reverse=True)
-            return pool[0].get("file_path")
-    return None
+            ranked.extend(i["file_path"] for i in pool)
+    return ranked
 
 
-def _best_logo(logos: list[dict], orig_lang: str | None) -> str | None:
-    """Pick best logo preferring PNG/raster over SVG across en -> null -> original_language."""
+def _best_image(items: list[dict], langs: tuple) -> str | None:
+    ranked = _ranked_images(items, langs)
+    return ranked[0] if ranked else None
+
+
+def _best_logo(
+    logos: list[dict],
+    orig_lang: str | None,
+    is_dark: Callable[[str], bool] | None = None,
+) -> str | None:
+    """Pick best visible logo preferring PNG/raster over SVG across en -> null -> original_language."""
     langs = tuple(dict.fromkeys(["en", None, orig_lang] if orig_lang else ["en", None]))
     raster = [i for i in logos if not (i.get("file_path") or "").lower().endswith(".svg")]
-    return _best_image(raster, langs) or _best_image(logos, langs)
+    candidates = _ranked_images(raster, langs)
+    if is_dark is None:
+        return candidates[0] if candidates else _best_image(logos, langs)
+    for path in candidates:
+        if not is_dark(path):
+            return path
+    return _best_image([i for i in logos if (i.get("file_path") or "").lower().endswith(".svg")], langs)
 
 
-def _fanart_logo(kind: str, tmdb_id: int, imdb_id: str | None, tvdb_id: int | None, orig_lang: str | None) -> str | None:
+def _fanart_logo(
+    kind: str,
+    tmdb_id: int,
+    imdb_id: str | None,
+    tvdb_id: int | None,
+    orig_lang: str | None,
+    is_dark: Callable[[str], bool] | None = None,
+) -> str | None:
     """Optional Fanart.tv fallback for transparent PNG logos when TMDB has none."""
     key = fanart_key()
     if not key:
@@ -88,7 +277,10 @@ def _fanart_logo(kind: str, tmdb_id: int, imdb_id: str | None, tvdb_id: int | No
         pool = [i for i in items if (i.get("lang") or "") == lang and i.get("url")]
         if pool:
             pool.sort(key=lambda i: int(i.get("likes") or 0), reverse=True)
-            return pool[0]["url"]
+            for item in pool:
+                candidate = item["url"]
+                if is_dark is None or not is_dark(candidate):
+                    return candidate
     return None
 
 
@@ -126,7 +318,12 @@ def _cert_tv(d: dict) -> str | None:
     return None
 
 
-def trim_title(kind: str, d: dict, logo_override: str | None = None) -> dict:
+def trim_title(
+    kind: str,
+    d: dict,
+    logo_override: str | None = None,
+    is_dark_logo: Callable[[str], bool] | None = None,
+) -> dict:
     images = d.get("images") or {}
     backdrops = images.get("backdrops") or []
     logos = images.get("logos") or []
@@ -174,7 +371,7 @@ def trim_title(kind: str, d: dict, logo_override: str | None = None) -> dict:
         # True only when the card image is a language-neutral (text-free) backdrop; the app overlays a
         # title/logo only then, otherwise the artwork's own printed title would appear twice.
         "card_backdrop_textless": _best_image(backdrops, (None,)) is not None,
-        "logo_path": _best_logo(logos, orig_lang) or logo_override,
+        "logo_path": _best_logo(logos, orig_lang, is_dark=is_dark_logo) or logo_override,
         "trailer_keys": _trailers((d.get("videos") or {}).get("results", []), d.get("original_language")),
         "cast": cast,
         "directors": directors,
@@ -222,9 +419,12 @@ def fetch_title(tmdb: Tmdb, kind: str, tmdb_id: int) -> dict | None:
                  cache=False)
     if not d:
         return None
-    out = trim_title(kind, d)
+    out = trim_title(kind, d, is_dark_logo=_is_dark_tmdb_logo)
     if not out.get("logo_path"):
-        out["logo_path"] = _fanart_logo(kind, tmdb_id, out.get("imdb_id"), out.get("tvdb_id"), out.get("original_language"))
+        out["logo_path"] = _fanart_logo(
+            kind, tmdb_id, out.get("imdb_id"), out.get("tvdb_id"), out.get("original_language"),
+            is_dark=_is_dark_logo_url,
+        )
     return out
 
 

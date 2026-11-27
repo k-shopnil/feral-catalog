@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import date
 
 from . import aot
+from .match import apply_override
 from .names import LANG_WORDS
 from .settings import load_sources, load_yaml, source_of
 from .tmdb import Tmdb
@@ -137,6 +138,7 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         (aot.AOT_WORK_KEY,),
     ).fetchall()
     sources = load_sources()
+    overrides = load_yaml("overrides.yaml", []) or []
     src_of = {r["path"]: source_of(sources, r["path"]) for r in rows}
     rows = _drop_cross_source_duplicates(rows, src_of)
     subs_by_dir = defaultdict(list)
@@ -152,6 +154,7 @@ def build(conn, tmdb: Tmdb | None) -> dict:
     t_versions = defaultdict(list)
     t_tags = defaultdict(set)
     t_status = {}
+    t_override: dict[str, dict] = {}
 
     aot_seen = False
     aot_season_counts = {
@@ -231,6 +234,10 @@ def build(conn, tmdb: Tmdb | None) -> dict:
         t_versions[tid].append(versions[vid])
         t_tags[tid].update(json.loads(r["tags"] or "[]"))
         t_status[tid] = r["status"]
+        if overrides and tid not in t_override:
+            ov = apply_override({"key": r["wkey"], "sample_path": r["path"]}, overrides)
+            if ov and (ov.get("title") or ov.get("year") is not None):
+                t_override[tid] = ov
 
     if aot_seen:
         aot.fill_missing_aot_episodes(episodes, seasons_raw)
@@ -314,6 +321,12 @@ def build(conn, tmdb: Tmdb | None) -> dict:
                     "episode_count_available": len(elist),
                 }
         titles[tid] = t
+        ov = t_override.get(tid)
+        if ov:
+            if ov.get("title"):
+                t["name"] = str(ov["title"])
+            if ov.get("year") is not None:
+                t["year"] = int(ov["year"])
 
     for t in titles.values():
         t["similar_ids"] = [x for x in dict.fromkeys(t.pop("_rec")) if x in titles and x != t["id"]][:20]

@@ -170,26 +170,30 @@ def match_one(tmdb: Tmdb, work: dict) -> tuple[str, int | None, float, float, li
 def match_works(conn, tmdb: Tmdb, workers: int = 8, limit: int | None = None) -> dict:
     now = int(time.time())
     overrides = load_overrides()
+    stats = {"works": 0, "auto": 0, "auto_low": 0, "unmatched": 0, "manual": 0, "ignored": 0, "error": 0}
+    overridden: set[str] = set()
+    if overrides:
+        for r in conn.execute("SELECT key, sample_path, status, tmdb_id FROM work WHERE status != 'ignored'").fetchall():
+            o = apply_override(r, overrides)
+            if not o:
+                continue
+            overridden.add(r["key"])
+            if o.get("ignore"):
+                conn.execute("UPDATE work SET status='ignored', updated_at=? WHERE key=?", (now, r["key"]))
+                stats["ignored"] += 1
+            elif o.get("tmdb") and (r["status"] != "manual" or r["tmdb_id"] != int(o["tmdb"]["id"])):
+                conn.execute("UPDATE work SET status='manual', tmdb_id=?, score=1.0, margin=1.0, updated_at=? WHERE key=?",
+                             (int(o["tmdb"]["id"]), now, r["key"]))
+                stats["manual"] += 1
     rows = conn.execute(
         "SELECT * FROM work WHERE status='new' OR (status IN ('unmatched','error') AND (last_attempt_at IS NULL OR last_attempt_at < ?)) "
         "OR status='manual'",
         (now - RETRY_AFTER,),
     ).fetchall()
-    stats = {"works": 0, "auto": 0, "auto_low": 0, "unmatched": 0, "manual": 0, "ignored": 0, "error": 0}
     todo = []
     for r in rows:
-        o = apply_override(r, overrides)
-        if o:
-            if o.get("ignore"):
-                conn.execute("UPDATE work SET status='ignored', updated_at=? WHERE key=?", (now, r["key"]))
-                stats["ignored"] += 1
-            elif o.get("tmdb"):
-                conn.execute("UPDATE work SET status='manual', tmdb_id=?, score=1.0, margin=1.0, updated_at=? WHERE key=?",
-                             (int(o["tmdb"]["id"]), now, r["key"]))
-                stats["manual"] += 1
-            continue
-        if r["status"] == "manual":
-            continue  # manual without matching override anymore: leave as-is
+        if r["key"] in overridden or r["status"] == "manual":
+            continue  # override already applied above, or manual without matching override: leave as-is
         todo.append(dict(r) | {"langs": json.loads(r["langs"] or "[]")})
     if limit:
         todo = todo[:limit]

@@ -9,3 +9,9 @@
 #   ignore: true
 - match: "s|disk7/ANIME - PART TWO/Attack On Titan/"
   tmdb: { kind: tv, id: 1429 }
+- match: "m|avengers endgame|2019"
+  ignore: true
+- match: "m|avengers endgame encore|2026"
+  tmdb: { kind: movie, id: 299534 }
+  title: "Avengers: Endgame Encore"
+  year: 2026
