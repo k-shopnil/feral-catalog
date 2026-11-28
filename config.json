@@ -1,0 +1,9 @@
+{
+ "image_base_url": "https://image.tmdb.org/t/p/",
+ "storage_root_url": "https://movie.ctgfun.com/",
+ "tmdb_attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+ "features": {
+  "trailers": true
+ },
+ "version": "e595421ca5a9"
+}

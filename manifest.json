@@ -1,0 +1,147 @@
+{
+ "schema": 2,
+ "catalog_version": 54,
+ "generated_at": 1795857485,
+ "snapshot": {
+  "version": 48,
+  "url": "snapshot/48.ndjson.gz",
+  "sha256": "c57fb189f424d4d5a199fdfc91e5141c44ea26cb0627ad5b5e914511f458be5f",
+  "bytes": 31445616
+ },
+ "deltas": [
+  {
+   "from": 48,
+   "to": 49,
+   "url": "delta/48-49.ndjson.gz",
+   "sha256": "44c46c77d459af019682f1921c374758a033a476345a9585da8f93a917caef93",
+   "bytes": 59937
+  },
+  {
+   "from": 49,
+   "to": 50,
+   "url": "delta/49-50.ndjson.gz",
+   "sha256": "823c15c6a04b2501bfa6a92d903394b1a14b8fe627c213212ac6a7ca92e46546",
+   "bytes": 3150
+  },
+  {
+   "from": 50,
+   "to": 51,
+   "url": "delta/50-51.ndjson.gz",
+   "sha256": "b2739442c3705a8082462db132b0a32a01b6c5b5f5914575368919e02ce730f9",
+   "bytes": 180068
+  },
+  {
+   "from": 51,
+   "to": 52,
+   "url": "delta/51-52.ndjson.gz",
+   "sha256": "14eaa35b05eb8fd6703b4a48cdd38a79ae728a26c3b9b1cddd74d3b0c665e2f1",
+   "bytes": 1932
+  },
+  {
+   "from": 52,
+   "to": 53,
+   "url": "delta/52-53.ndjson.gz",
+   "sha256": "6fd8d31ac98dcc0a3f727212fc8ca3d8daa5cd61b8ae5a3db41f51449e9c96ae",
+   "bytes": 1569
+  },
+  {
+   "from": 53,
+   "to": 54,
+   "url": "delta/53-54.ndjson.gz",
+   "sha256": "7e71529c467ba48daced498d5357c82aed7e2c31fcec8840088af160a19469e8",
+   "bytes": 1996
+  }
+ ],
+ "rows": {
+  "url": "rows.json",
+  "version": "01114b6ccd17"
+ },
+ "config": {
+  "url": "config.json",
+  "version": "e595421ca5a9"
+ },
+ "counts": {
+  "titles": 20095,
+  "seasons": 4864,
+  "episodes": 60989,
+  "versions": 116254
+ },
+ "last_run": {
+  "started_at": 1795857111,
+  "finished_at": 1795857413,
+  "crawl": {
+   "listed": 5546,
+   "failed": 3,
+   "new_dirs": 0,
+   "new_files": 2,
+   "missing": 0,
+   "unstable_dirs": 0,
+   "sources": {
+    "ctgfun": {
+     "listed": 1575,
+     "failed": 0,
+     "new_dirs": 0,
+     "new_files": 0,
+     "missing": 0,
+     "unstable_dirs": 0
+    },
+    "data": {
+     "listed": 2079,
+     "failed": 2,
+     "new_dirs": 0,
+     "new_files": 1,
+     "missing": 0,
+     "unstable_dirs": 0
+    },
+    "ftp": {
+     "listed": 361,
+     "failed": 1,
+     "new_dirs": 0,
+     "new_files": 1,
+     "missing": 0,
+     "unstable_dirs": 0
+    },
+    "dl": {
+     "listed": 941,
+     "failed": 0,
+     "new_dirs": 0,
+     "new_files": 0,
+     "missing": 0,
+     "unstable_dirs": 0
+    },
+    "media": {
+     "listed": 590,
+     "failed": 0,
+     "new_dirs": 0,
+     "new_files": 0,
+     "missing": 0,
+     "unstable_dirs": 0
+    }
+   }
+  },
+  "process": {
+   "files": 0,
+   "movie": 0,
+   "episode": 0,
+   "special": 0,
+   "extra": 0,
+   "sample": 0,
+   "unknown": 0
+  },
+  "match": {
+   "works": 0,
+   "auto": 0,
+   "auto_low": 0,
+   "unmatched": 0,
+   "manual": 0,
+   "ignored": 0,
+   "error": 0
+  },
+  "enrich": {
+   "titles": 0,
+   "seasons": 569,
+   "failed": 0
+  },
+  "indexer_version": "0.2.0"
+ }
+}
